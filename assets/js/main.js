@@ -16,7 +16,9 @@ const CONSENT_VERSION = 1;
 const CONSENT_VALIDITY_DAYS = 180;
 const CONSENT_VALIDITY_MS = CONSENT_VALIDITY_DAYS * 24 * 60 * 60 * 1000;
 const META_PIXEL_ID = '1695390391145063';
+const META_PIXEL_SCRIPT_URL = 'https://connect.facebook.net/en_US/fbevents.js';
 const META_PIXEL_SCRIPT_SELECTOR = 'script[src*="connect.facebook.net"][src*="fbevents.js"]';
+const LEAD_NAVIGATION_TIMEOUT_MS = 1200;
 const cookieBanner = document.querySelector('#cookie-banner');
 const cookieOverlay = document.querySelector('#cookie-preferences');
 const analyticsToggle = document.querySelector('#consent-analytics');
@@ -113,7 +115,7 @@ function loadMetaPixelScript() {
   pixelScriptRequested = true;
   const script = document.createElement('script');
   script.async = true;
-  script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+  script.src = META_PIXEL_SCRIPT_URL;
   script.addEventListener('error', () => {
     pixelScriptRequested = false;
     script.remove();
@@ -139,7 +141,7 @@ function enableMetaPixel() {
 }
 
 function applyPixelConsent(consent) {
-  if (consent?.marketing === true) {
+  if (consent?.marketing === true && isValidConsent(consent)) {
     enableMetaPixel();
     return;
   }
@@ -192,6 +194,22 @@ function rejectOptionalCookies() {
   saveConsent({ analytics: false, marketing: false });
 }
 
+function getWhatsAppGroupLink(target) {
+  const link = target?.closest?.('a[data-whatsapp]');
+  if (!link) return null;
+
+  try {
+    const url = new URL(link.href, window.location.href);
+    const host = url.hostname.toLowerCase();
+    const isWhatsAppHost = host === 'wa.me'
+      || host === 'whatsapp.com'
+      || host.endsWith('.whatsapp.com');
+    return url.protocol === 'https:' && isWhatsAppHost ? link : null;
+  } catch {
+    return null;
+  }
+}
+
 document.querySelectorAll('[data-cookie-accept]').forEach((button) => button.addEventListener('click', () => {
   saveConsent({ analytics: true, marketing: true });
 }));
@@ -213,13 +231,39 @@ document.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('click', (event) => {
-  const whatsappLink = event.target.closest?.('[data-whatsapp]');
+  const whatsappLink = getWhatsAppGroupLink(event.target);
   if (!whatsappLink || !hasMarketingConsent()) return;
 
   enableMetaPixel();
-  if (hasMarketingConsent() && pixelInitialized && typeof window.fbq === 'function') {
-    window.fbq('track', 'Lead');
+  if (!hasMarketingConsent() || !pixelInitialized || typeof window.fbq !== 'function') return;
+
+  const fbq = window.fbq;
+  const modifiedClick = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+  const opensAnotherContext = whatsappLink.target && whatsappLink.target.toLowerCase() !== '_self';
+  const isDownload = whatsappLink.hasAttribute('download');
+  const canDelayNavigation = event.button === 0 && !modifiedClick && !opensAnotherContext && !isDownload;
+
+  if (!canDelayNavigation) {
+    fbq('track', 'Lead');
+    return;
   }
+
+  event.preventDefault();
+  let navigated = false;
+  const navigate = () => {
+    if (navigated) return;
+    navigated = true;
+    window.location.assign(whatsappLink.href);
+  };
+  const navigationTimer = window.setTimeout(navigate, LEAD_NAVIGATION_TIMEOUT_MS);
+
+  fbq('track', 'Lead', {}, {
+    eventCallback: () => {
+      window.clearTimeout(navigationTimer);
+      navigate();
+    },
+    eventTimeout: LEAD_NAVIGATION_TIMEOUT_MS
+  });
 });
 
 window.addEventListener('storage', (event) => {
