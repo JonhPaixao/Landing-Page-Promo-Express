@@ -14,6 +14,7 @@ nav?.querySelectorAll('a').forEach((link) => link.addEventListener('click', () =
 const CONSENT_STORAGE_KEY = 'promoExpressConsent';
 const CONSENT_VERSION = 1;
 const CONSENT_VALIDITY_DAYS = 180;
+const CONSENT_VALIDITY_MS = CONSENT_VALIDITY_DAYS * 24 * 60 * 60 * 1000;
 const META_PIXEL_ID = '1695390391145063';
 const META_PIXEL_SCRIPT_SELECTOR = 'script[src*="connect.facebook.net"][src*="fbevents.js"]';
 const cookieBanner = document.querySelector('#cookie-banner');
@@ -30,8 +31,18 @@ function readConsent() {
   try {
     const raw = localStorage.getItem(CONSENT_STORAGE_KEY);
     if (!raw) return null;
+
     const consent = JSON.parse(raw);
-    if (consent.version !== CONSENT_VERSION || !Number.isFinite(consent.expiresAt) || consent.expiresAt <= Date.now()) {
+    const isValid = consent !== null
+      && typeof consent === 'object'
+      && consent.necessary === true
+      && typeof consent.analytics === 'boolean'
+      && typeof consent.marketing === 'boolean'
+      && consent.version === CONSENT_VERSION
+      && Number.isFinite(consent.expiresAt)
+      && consent.expiresAt > Date.now();
+
+    if (!isValid) {
       localStorage.removeItem(CONSENT_STORAGE_KEY);
       return null;
     }
@@ -123,7 +134,7 @@ function saveConsent({ analytics = false, marketing = false } = {}) {
     marketing: Boolean(marketing),
     version: CONSENT_VERSION,
     updatedAt: now,
-    expiresAt: now + CONSENT_VALIDITY_DAYS * 24 * 60 * 60 * 1000
+    expiresAt: now + CONSENT_VALIDITY_MS
   };
   sessionConsent = consent;
   try {
@@ -131,8 +142,8 @@ function saveConsent({ analytics = false, marketing = false } = {}) {
   } catch {
     // A escolha continua aplicada nesta visita se o navegador bloquear armazenamento.
   }
-  cookieBanner.hidden = true;
-  cookieOverlay.hidden = true;
+  if (cookieBanner) cookieBanner.hidden = true;
+  if (cookieOverlay) cookieOverlay.hidden = true;
   document.body.classList.remove('cookie-dialog-open');
   applyPixelConsent(consent);
 }
@@ -140,14 +151,16 @@ function saveConsent({ analytics = false, marketing = false } = {}) {
 function openPreferences() {
   const consent = getCurrentConsent();
   priorFocus = document.activeElement;
-  analyticsToggle.checked = consent?.analytics === true;
-  marketingToggle.checked = consent?.marketing === true;
+  if (analyticsToggle) analyticsToggle.checked = consent?.analytics === true;
+  if (marketingToggle) marketingToggle.checked = consent?.marketing === true;
+  if (!cookieOverlay) return;
   cookieOverlay.hidden = false;
   document.body.classList.add('cookie-dialog-open');
   cookieOverlay.querySelector('[data-cookie-close]')?.focus();
 }
 
 function closePreferences() {
+  if (!cookieOverlay) return;
   cookieOverlay.hidden = true;
   document.body.classList.remove('cookie-dialog-open');
   priorFocus?.focus?.();
@@ -163,12 +176,12 @@ document.querySelectorAll('[data-cookie-accept]').forEach((button) => button.add
 document.querySelectorAll('[data-cookie-reject]').forEach((button) => button.addEventListener('click', rejectOptionalCookies));
 document.querySelector('[data-cookie-customize]')?.addEventListener('click', openPreferences);
 document.querySelector('[data-open-cookie-settings]')?.addEventListener('click', () => {
-  cookieBanner.hidden = true;
+  if (cookieBanner) cookieBanner.hidden = true;
   openPreferences();
 });
 document.querySelector('[data-cookie-close]')?.addEventListener('click', closePreferences);
 document.querySelector('[data-cookie-save]')?.addEventListener('click', () => {
-  saveConsent({ analytics: analyticsToggle.checked, marketing: marketingToggle.checked });
+  saveConsent({ analytics: analyticsToggle?.checked, marketing: marketingToggle?.checked });
 });
 cookieOverlay?.addEventListener('click', (event) => {
   if (event.target === cookieOverlay) closePreferences();
