@@ -15,6 +15,7 @@ const CONSENT_STORAGE_KEY = 'promoExpressConsent';
 const CONSENT_VERSION = 1;
 const CONSENT_VALIDITY_DAYS = 180;
 const META_PIXEL_ID = '1695390391145063';
+const META_PIXEL_SCRIPT_SELECTOR = 'script[src*="connect.facebook.net"][src*="fbevents.js"]';
 const cookieBanner = document.querySelector('#cookie-banner');
 const cookieOverlay = document.querySelector('#cookie-preferences');
 const analyticsToggle = document.querySelector('#consent-analytics');
@@ -69,10 +70,21 @@ function getMetaPixel() {
 
 function loadMetaPixelScript() {
   if (pixelScriptRequested) return;
+
+  const existingScript = document.querySelector(META_PIXEL_SCRIPT_SELECTOR);
+  if (existingScript) {
+    pixelScriptRequested = true;
+    return;
+  }
+
   pixelScriptRequested = true;
   const script = document.createElement('script');
   script.async = true;
   script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+  script.addEventListener('error', () => {
+    pixelScriptRequested = false;
+    script.remove();
+  }, { once: true });
   document.head.appendChild(script);
 }
 
