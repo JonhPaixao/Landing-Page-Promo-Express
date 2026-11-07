@@ -28,28 +28,44 @@ let pixelScriptRequested = false;
 let pixelPageViewSent = false;
 
 function readConsent() {
+  let raw;
   try {
-    const raw = localStorage.getItem(CONSENT_STORAGE_KEY);
-    if (!raw) return null;
-
-    const consent = JSON.parse(raw);
-    const isValid = consent !== null
-      && typeof consent === 'object'
-      && consent.necessary === true
-      && typeof consent.analytics === 'boolean'
-      && typeof consent.marketing === 'boolean'
-      && consent.version === CONSENT_VERSION
-      && Number.isFinite(consent.expiresAt)
-      && consent.expiresAt > Date.now();
-
-    if (!isValid) {
-      localStorage.removeItem(CONSENT_STORAGE_KEY);
-      return null;
-    }
-    return consent;
+    raw = localStorage.getItem(CONSENT_STORAGE_KEY);
   } catch {
     return null;
   }
+  if (!raw) return null;
+
+  let consent;
+  try {
+    consent = JSON.parse(raw);
+  } catch {
+    try {
+      localStorage.removeItem(CONSENT_STORAGE_KEY);
+    } catch {
+      // O banner continua disponível mesmo se o navegador bloquear o armazenamento.
+    }
+    return null;
+  }
+
+  const isValid = consent !== null
+    && typeof consent === 'object'
+    && consent.necessary === true
+    && typeof consent.analytics === 'boolean'
+    && typeof consent.marketing === 'boolean'
+    && consent.version === CONSENT_VERSION
+    && Number.isFinite(consent.expiresAt)
+    && consent.expiresAt > Date.now();
+
+  if (!isValid) {
+    try {
+      localStorage.removeItem(CONSENT_STORAGE_KEY);
+    } catch {
+      // O banner continua disponível mesmo se o navegador bloquear o armazenamento.
+    }
+    return null;
+  }
+  return consent;
 }
 
 function getCurrentConsent() {
