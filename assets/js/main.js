@@ -14,11 +14,16 @@ nav?.querySelectorAll('a').forEach((link) => link.addEventListener('click', () =
 const CONSENT_STORAGE_KEY = 'promoExpressConsent';
 const CONSENT_VERSION = 1;
 const CONSENT_VALIDITY_DAYS = 180;
+const META_PIXEL_ID = '1695390391145063';
 const cookieBanner = document.querySelector('#cookie-banner');
 const cookieOverlay = document.querySelector('#cookie-preferences');
 const analyticsToggle = document.querySelector('#consent-analytics');
 const marketingToggle = document.querySelector('#consent-marketing');
 let priorFocus = null;
+let sessionConsent = null;
+let pixelInitialized = false;
+let pixelScriptRequested = false;
+let pixelPageViewSent = false;
 
 function readConsent() {
   try {
@@ -35,6 +40,69 @@ function readConsent() {
   }
 }
 
+function getCurrentConsent() {
+  return readConsent() || sessionConsent;
+}
+
+function hasMarketingConsent() {
+  return getCurrentConsent()?.marketing === true;
+}
+
+function getMetaPixel() {
+  if (typeof window.fbq === 'function') return window.fbq;
+
+  const fbq = function () {
+    if (fbq.callMethod) {
+      fbq.callMethod.apply(fbq, arguments);
+    } else {
+      fbq.queue.push(arguments);
+    }
+  };
+  fbq.push = fbq;
+  fbq.loaded = true;
+  fbq.version = '2.0';
+  fbq.queue = [];
+  window.fbq = fbq;
+  if (!window._fbq) window._fbq = fbq;
+  return fbq;
+}
+
+function loadMetaPixelScript() {
+  if (pixelScriptRequested) return;
+  pixelScriptRequested = true;
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = 'https://connect.facebook.net/en_US/fbevents.js';
+  document.head.appendChild(script);
+}
+
+function enableMetaPixel() {
+  if (!hasMarketingConsent()) return;
+
+  const fbq = getMetaPixel();
+  fbq('consent', 'grant');
+  if (!pixelInitialized) {
+    fbq('init', META_PIXEL_ID);
+    pixelInitialized = true;
+  }
+  loadMetaPixelScript();
+
+  if (!pixelPageViewSent) {
+    fbq('track', 'PageView');
+    pixelPageViewSent = true;
+  }
+}
+
+function applyPixelConsent(consent) {
+  if (consent?.marketing === true) {
+    enableMetaPixel();
+    return;
+  }
+  if (pixelInitialized && typeof window.fbq === 'function') {
+    window.fbq('consent', 'revoke');
+  }
+}
+
 function saveConsent({ analytics = false, marketing = false } = {}) {
   const now = Date.now();
   const consent = {
@@ -45,6 +113,7 @@ function saveConsent({ analytics = false, marketing = false } = {}) {
     updatedAt: now,
     expiresAt: now + CONSENT_VALIDITY_DAYS * 24 * 60 * 60 * 1000
   };
+  sessionConsent = consent;
   try {
     localStorage.setItem(CONSENT_STORAGE_KEY, JSON.stringify(consent));
   } catch {
@@ -53,10 +122,11 @@ function saveConsent({ analytics = false, marketing = false } = {}) {
   cookieBanner.hidden = true;
   cookieOverlay.hidden = true;
   document.body.classList.remove('cookie-dialog-open');
+  applyPixelConsent(consent);
 }
 
 function openPreferences() {
-  const consent = readConsent();
+  const consent = getCurrentConsent();
   priorFocus = document.activeElement;
   analyticsToggle.checked = consent?.analytics === true;
   marketingToggle.checked = consent?.marketing === true;
@@ -95,7 +165,28 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && cookieOverlay && !cookieOverlay.hidden) closePreferences();
 });
 
-if (cookieBanner && !readConsent()) cookieBanner.hidden = false;
+document.addEventListener('click', (event) => {
+  const whatsappLink = event.target.closest?.('[data-whatsapp]');
+  if (!whatsappLink || !hasMarketingConsent()) return;
+
+  enableMetaPixel();
+  if (hasMarketingConsent() && pixelInitialized && typeof window.fbq === 'function') {
+    window.fbq('track', 'Lead');
+  }
+});
+
+window.addEventListener('storage', (event) => {
+  if (event.key !== CONSENT_STORAGE_KEY && event.key !== null) return;
+  sessionConsent = readConsent();
+  applyPixelConsent(sessionConsent);
+  if (cookieBanner && !sessionConsent) cookieBanner.hidden = false;
+  if (cookieBanner && sessionConsent) cookieBanner.hidden = true;
+});
+
+const initialConsent = readConsent();
+sessionConsent = initialConsent;
+if (cookieBanner && !initialConsent) cookieBanner.hidden = false;
+applyPixelConsent(initialConsent);
 
 const year = document.querySelector('#year');
 if (year) year.textContent = new Date().getFullYear();
