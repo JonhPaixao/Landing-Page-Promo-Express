@@ -27,6 +27,17 @@ let pixelInitialized = false;
 let pixelScriptRequested = false;
 let pixelPageViewSent = false;
 
+function isValidConsent(consent) {
+  return consent !== null
+    && typeof consent === 'object'
+    && consent.necessary === true
+    && typeof consent.analytics === 'boolean'
+    && typeof consent.marketing === 'boolean'
+    && consent.version === CONSENT_VERSION
+    && Number.isFinite(consent.expiresAt)
+    && consent.expiresAt > Date.now();
+}
+
 function readConsent() {
   let raw;
   try {
@@ -48,16 +59,7 @@ function readConsent() {
     return null;
   }
 
-  const isValid = consent !== null
-    && typeof consent === 'object'
-    && consent.necessary === true
-    && typeof consent.analytics === 'boolean'
-    && typeof consent.marketing === 'boolean'
-    && consent.version === CONSENT_VERSION
-    && Number.isFinite(consent.expiresAt)
-    && consent.expiresAt > Date.now();
-
-  if (!isValid) {
+  if (!isValidConsent(consent)) {
     try {
       localStorage.removeItem(CONSENT_STORAGE_KEY);
     } catch {
@@ -69,7 +71,11 @@ function readConsent() {
 }
 
 function getCurrentConsent() {
-  return readConsent() || sessionConsent;
+  return readConsent() || (isValidConsent(sessionConsent) ? sessionConsent : null);
+}
+
+function syncCookieBanner(consent) {
+  if (cookieBanner) cookieBanner.hidden = isValidConsent(consent);
 }
 
 function hasMarketingConsent() {
@@ -158,7 +164,7 @@ function saveConsent({ analytics = false, marketing = false } = {}) {
   } catch {
     // A escolha continua aplicada nesta visita se o navegador bloquear armazenamento.
   }
-  if (cookieBanner) cookieBanner.hidden = true;
+  syncCookieBanner(consent);
   if (cookieOverlay) cookieOverlay.hidden = true;
   document.body.classList.remove('cookie-dialog-open');
   applyPixelConsent(consent);
@@ -219,14 +225,14 @@ document.addEventListener('click', (event) => {
 window.addEventListener('storage', (event) => {
   if (event.key !== CONSENT_STORAGE_KEY && event.key !== null) return;
   sessionConsent = readConsent();
-  applyPixelConsent(sessionConsent);
-  if (cookieBanner && !sessionConsent) cookieBanner.hidden = false;
-  if (cookieBanner && sessionConsent) cookieBanner.hidden = true;
+  const consent = getCurrentConsent();
+  syncCookieBanner(consent);
+  applyPixelConsent(consent);
 });
 
 const initialConsent = readConsent();
 sessionConsent = initialConsent;
-if (cookieBanner && !initialConsent) cookieBanner.hidden = false;
+syncCookieBanner(getCurrentConsent());
 applyPixelConsent(initialConsent);
 
 const year = document.querySelector('#year');
